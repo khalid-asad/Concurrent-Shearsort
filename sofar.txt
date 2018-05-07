@@ -1,0 +1,159 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+#include <pthread.h>
+
+
+struct Params
+{
+    int *start;
+    size_t len;
+    int depth;
+};
+
+// only used for synchronizing stdout from overlap.
+pthread_mutex_t mtx = PTHREAD_MUTEX_INITIALIZER;
+
+// forward declare our thread proc
+void *shear_sort_thread(void *pv);
+
+/*void rowsort(int i){
+    for(int j=0;j<n-1;j++){
+        for(int k=0;k<n-j-1;k++){
+            if(a[i][k]>a[i][k+1]){
+                int temp=a[i][k];
+                a[i][k]=a[i][k+1];
+                a[i][k+1]=temp;
+            }
+        }
+    }
+}
+void rowrevsort(int i){
+    for(int j=0;j<n-1;j++){
+        for(int k=0;k<n-j-1;k++){
+            if(a[i][k]<a[i][k+1]){
+                int temp=a[i][k];
+                a[i][k]=a[i][k+1];
+                a[i][k+1]=temp;
+            }
+        }
+    }
+}
+void colsort(int i){
+    for(int j=0;j<n-1;j++){
+        for(int k=0;k<n-j-1;k++){
+            if(a[k][i]>a[k+1][i]){
+                int temp=a[k][i];
+                a[k][i]=a[k+1][i];
+                a[k+1][i]=temp;
+            }
+        }
+    }
+}*/
+
+// a simple merge algorithm. there are *several* more efficient ways
+//  of doing this, but the purpose of this exercise is to establish
+//  merge-threading, so we stick with simple for now.
+void merge(int *start, int *mid, int *end){
+    int *res = malloc((end - start)*sizeof(*res));
+    int *lhs = start, *rhs = mid, *dst = res;
+
+    while (lhs != mid && rhs != end)
+        *dst++ = (*lhs <= *rhs) ? *lhs++ : *rhs++;
+
+    while (lhs != mid)
+        *dst++ = *lhs++;
+
+    while (rhs != end)
+        *dst++ = *rhs++;
+
+    // copy results
+    memcpy(start, res, (end - start)*sizeof(*res));
+    free(res);
+}
+
+// our multi-threaded entry point.
+void shear_sort_mt(int *start, size_t len, int depth){
+    if (len < 2)
+        return;
+
+    if (depth <= 0 || len < 4){
+        shear_sort_mt(start, len/2, 0);
+        shear_sort_mt(start+len/2, len-len/2, 0);
+    }else{
+        struct Params params = { start, len/2, depth/2 };
+        pthread_t thrd;
+
+        pthread_mutex_lock(&mtx);
+        printf("Starting subthread...\n");
+        pthread_mutex_unlock(&mtx);
+
+        // create our thread
+        pthread_create(&thrd, NULL, shear_sort_thread, &params);
+
+        // recurse into our top-end parition
+        shear_sort_mt(start+len/2, len-len/2, depth/2);
+
+        // join on the launched thread
+        pthread_join(thrd, NULL);
+
+        pthread_mutex_lock(&mtx);
+        printf("Finished subthread.\n");
+        pthread_mutex_unlock(&mtx);
+    }
+
+    // merge the paritions.
+    merge(start, start+len/2, start+len);
+}
+
+// our thread-proc that invokes merge_sort. this just passes the
+//  given parameters off to our merge_sort algorithm
+void *shear_sort_thread(void *pv){
+    struct Params *params = pv;
+    shear_sort_mt(params->start, params->len, params->depth);
+    return pv;
+}
+
+// public-facing api
+void shear_sort(int *start, size_t len){
+    shear_sort_mt(start, len, 3); // 4 is a nice number, will use 7 threads.
+}
+
+int main(){
+    static const unsigned int N = 16;
+    int *data = malloc(N * sizeof(*data));
+    unsigned int i;
+
+    /*srand((unsigned)time(0));
+    for (i=0; i<N; ++i)
+    {
+        data[i] = rand() % 16;
+        printf("%4d ", data[i]);
+        if ((i+1)%4 == 0)
+            printf("\n");
+    }
+    printf("\n");*/
+
+    FILE *myFile;
+    myFile = fopen("input.txt", "r");
+
+    for (i = 0; i < N; i++){
+        fscanf(myFile, "%d", &data[i]);
+        printf("%4d ", data[i]);
+        if ((i+1)%4 == 0)
+            printf("\n");
+    }
+    // invoke our multi-threaded merge-sort
+    shear_sort(data, N);
+    for (i=0; i<N; ++i){
+        printf("%4d ", data[i]);
+        if ((i+1)%4 == 0)
+            printf("\n");
+    }
+    printf("\n");
+
+    free(data);
+
+    return 0;
+}
